@@ -1,4 +1,6 @@
 pub mod parse;
+use std::num::NonZeroU32;
+
 use parse::*;
 
 pub enum ReadMode {
@@ -34,7 +36,7 @@ impl<R: std::io::Read> Iterator for LogIterator<R> {
     type Item = parse::LogLine;
     fn next(&mut self) -> Option<Self::Item> {
         let line = self.lines.next()?.ok()?;
-        let (remaining, result) = LOG_LINE_PARSER.parse(line.trim()).ok()?;
+        let (remaining, result) = LogLine::parser().parse(line.trim()).ok()?;
         remaining.trim().is_empty().then_some(result)
     }
 }
@@ -43,48 +45,32 @@ impl<R: std::io::Read> Iterator for LogIterator<R> {
 pub fn read_log<R: std::io::Read>(
     reader: R,
     mode: ReadMode,
-    request_ids: Vec<u32>,
+    request_ids: Vec<NonZeroU32>,
 ) -> Vec<LogLine> {
-    let logs = LogIterator::new(reader);
-    let mut collected = Vec::new();
-    // подсказка: можно обойтись итераторами
-
-    for log in logs {
-        if request_ids.is_empty() || {
-            let mut request_id_found = false;
-            for request_id in &request_ids {
-                if *request_id == log.request_id {
-                    request_id_found = true;
-                    break;
+    LogIterator::new(reader)
+        .filter(|log| {
+            (request_ids.is_empty() || request_ids.contains(&log.request_id))
+                && match mode {
+                    ReadMode::All => true,
+                    ReadMode::Exchanges => matches!(
+                        &log.kind,
+                        LogKind::App(AppLogKind::Journal(
+                            AppLogJournalKind::BuyAsset(_)
+                                | AppLogJournalKind::SellAsset(_)
+                                | AppLogJournalKind::CreateUser { .. }
+                                | AppLogJournalKind::RegisterAsset { .. }
+                                | AppLogJournalKind::DepositCash(_)
+                                | AppLogJournalKind::WithdrawCash(_)
+                        ))
+                    ),
+                    ReadMode::Errors => matches!(
+                        &log.kind,
+                        LogKind::System(SystemLogKind::Error(_))
+                            | LogKind::App(AppLogKind::Error(_))
+                    ),
                 }
-            }
-            request_id_found
-        } && match mode {
-            ReadMode::All => true,
-            ReadMode::Exchanges => {
-                matches!(
-                    &log.kind,
-                    LogKind::App(AppLogKind::Journal(
-                        AppLogJournalKind::BuyAsset(_)
-                            | AppLogJournalKind::SellAsset(_)
-                            | AppLogJournalKind::CreateUser { .. }
-                            | AppLogJournalKind::RegisterAsset { .. }
-                            | AppLogJournalKind::DepositCash(_)
-                            | AppLogJournalKind::WithdrawCash(_)
-                    ))
-                )
-            }
-            ReadMode::Errors => {
-                matches!(
-                    &log.kind,
-                    LogKind::System(SystemLogKind::Error(_)) | LogKind::App(AppLogKind::Error(_))
-                )
-            }
-        } {
-            collected.push(log);
-        }
-    }
-    collected
+        })
+        .collect()
 }
 
 #[cfg(test)]

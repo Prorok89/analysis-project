@@ -48,20 +48,34 @@
 //  -- Error
 //   --- нет сети
 //   --- отказано в доступе
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Placeholder для экспериментов с cli");
 
-    let parsing_demo = r#"[UserBackets{"user_id":"Bob","backets":[Backet{"asset_id":"milk","count":3,},],},]"#.to_string();
-    let announcements = analysis::parse::just_parse::<analysis::parse::Announcements>(&parsing_demo).unwrap();
+    let parsing_demo =
+        r#"[UserBackets{"user_id":"Bob","backets":[Backet{"asset_id":"milk","count":3,},],},]"#
+            .to_string();
+    let announcements =
+        analysis::parse::just_parse::<analysis::parse::Announcements>(&parsing_demo)
+            .map_err(|_| "не удалось распарсить demo")?;
     println!("demo-parsed: {:?}", announcements);
 
     let args = std::env::args().collect::<Vec<_>>();
-    let filename = args[1].clone();
-    println!("Trying opening file '{}' from directory '{}'", filename, std::env::current_dir().unwrap().to_string_lossy());
-    
-	let logs = analysis::read_log(std::fs::File::open(filename).unwrap(), analysis::ReadMode::All, vec![]);
-    
+	let filename = &args[1..].first().ok_or("использование: cli <file>")?;
+
+    println!(
+        "Trying opening file '{}' from directory '{}'",
+        filename,
+        std::env::current_dir()?.to_string_lossy()
+    );
+
+    let logs = analysis::read_log(
+        std::fs::File::open(filename)?,
+        analysis::ReadMode::All,
+        vec![],
+    );
+
     println!("got logs:");
     logs.iter().for_each(|parsed| println!("  {:?}", parsed));
-}
 
+    Ok(())
+}
